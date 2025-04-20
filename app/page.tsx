@@ -4,8 +4,9 @@ import { useState, useRef, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ChatMessage } from "@/components/chat-message";
-import { Send, MessageSquare, Plus, Settings, LogOut } from "lucide-react";
+import { Send, MessageSquare, Plus, Settings, LogOut, X } from "lucide-react";
 import { OpenAI } from "openai";
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
 interface Message {
   role: "user" | "assistant";
@@ -30,11 +31,13 @@ const initialChat: Chat = {
   ]
 };
 
-// OpenAIのクライアントインスタンスを作成
-const openai = new OpenAI({
-  apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY || "", // API KEYを環境変数から取得
-  dangerouslyAllowBrowser: true // クライアントサイドで実行するための設定
-});
+// 利用可能なOpenAIモデルのリスト
+const availableModels = [
+  { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo" },
+  // { id: "gpt-4", name: "GPT-4" },
+  // { id: "gpt-4-turbo", name: "GPT-4 Turbo" },
+  { id: "gpt-4o-mini", name: "GPT-4o-mini" },
+];
 
 export default function Home() {
   const [chats, setChats] = useState<Chat[]>([initialChat]);
@@ -42,7 +45,16 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+  const [apiKey, setApiKey] = useState(process.env.NEXT_PUBLIC_OPENAI_API_KEY || "");
+  const [selectedModel, setSelectedModel] = useState("gpt-3.5-turbo");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // OpenAIのクライアントインスタンスを作成
+  const openai = new OpenAI({
+    apiKey: apiKey, // 入力されたAPI Keyを使用
+    dangerouslyAllowBrowser: true // クライアントサイドで実行するための設定
+  });
 
   // 現在のチャットを取得
   const currentChat = chats.find(chat => chat.id === currentChatId) || initialChat;
@@ -78,8 +90,8 @@ export default function Home() {
     
     try {
       // OpenAI APIに送信するメッセージ履歴を作成
-      const messages = currentChat.messages.map(msg => ({
-        role: msg.role,
+      const messages: ChatCompletionMessageParam[] = currentChat.messages.map(msg => ({
+        role: msg.role === "user" ? "user" : "assistant",
         content: msg.content
       }));
       
@@ -88,8 +100,8 @@ export default function Home() {
       
       // OpenAI APIを呼び出し
       const response = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo", // 使用するモデル
-        messages: messages as any,
+        model: selectedModel, // 選択されたモデルを使用
+        messages: messages,
         temperature: 0.7,
       });
       
@@ -115,10 +127,26 @@ export default function Home() {
     } catch (error) {
       console.error("OpenAI API error:", error);
       
+      // エラーの種類に応じたメッセージを表示
+      let errorContent = "申し訳ありません。AI応答の生成中にエラーが発生しました。後でもう一度お試しください。";
+      
+      // APIキーエラーの場合
+      if (error instanceof Error) {
+        console.log('Error message:', error.message);
+        
+        if (error.message.includes('API key')) {
+          errorContent = "OpenAI APIキーが無効です。設定から正しいAPIキーを入力してください。";
+        } else if (error.message.includes('model')) {
+          errorContent = "選択されたモデルが利用できません。別のモデルを選択するか、APIキーの権限を確認してください。";
+        } else if (error.message.includes('billing') || error.message.includes('quota')) {
+          errorContent = "OpenAIアカウントの支払い設定またはクォータに問題があります。OpenAIダッシュボードで確認してください。";
+        }
+      }
+      
       // エラーメッセージをアシスタントの応答として追加
       const errorMessage: Message = {
         role: "assistant",
-        content: "申し訳ありません。AI応答の生成中にエラーが発生しました。後でもう一度お試しください。"
+        content: errorContent
       };
       
       setChats(prevChats => 
@@ -152,6 +180,32 @@ export default function Home() {
   const toggleSidebar = () => {
     setShowSidebar(!showSidebar);
   };
+  
+  const toggleSettings = () => {
+    setShowSettings(!showSettings);
+  };
+  
+  const handleSaveSettings = () => {
+    // 設定を保存し、設定パネルを閉じる
+    // localStorage に保存することも可能
+    localStorage.setItem('openai_api_key', apiKey);
+    localStorage.setItem('openai_model', selectedModel);
+    toggleSettings();
+  };
+  
+  // コンポーネントマウント時に保存済み設定を読み込む
+  useEffect(() => {
+    const savedApiKey = localStorage.getItem('openai_api_key');
+    const savedModel = localStorage.getItem('openai_model');
+    
+    if (savedApiKey) {
+      setApiKey(savedApiKey);
+    }
+    
+    if (savedModel) {
+      setSelectedModel(savedModel);
+    }
+  }, []);
 
   return (
     <div className="flex h-screen bg-white">
@@ -186,9 +240,13 @@ export default function Home() {
         
         {/* サイドバーフッター */}
         <div className="p-3 border-t border-[#374151]">
-          <button className="flex items-center gap-2 w-full p-2 rounded hover:bg-[#1f2937] transition">
-            <Settings size={16} />
+          <button 
+            onClick={toggleSettings}
+            className="flex items-center gap-2 w-full p-2 rounded hover:bg-[#1f2937] transition"
+          >
+            <Settings size={16} className={!apiKey ? "text-red-400" : ""} />
             <span>設定</span>
+            {!apiKey && <span className="ml-1 text-xs text-red-400">*</span>}
           </button>
           <button className="flex items-center gap-2 w-full p-2 rounded hover:bg-[#1f2937] transition">
             <LogOut size={16} />
@@ -208,6 +266,9 @@ export default function Home() {
           </button>
           <div className="flex-1 px-4 py-3">
             <h1 className="text-xl font-bold text-center">{currentChat.title}</h1>
+            <p className="text-xs text-center text-gray-500">
+              使用中のモデル: {availableModels.find(m => m.id === selectedModel)?.name || selectedModel}
+            </p>
           </div>
         </header>
         
@@ -249,6 +310,60 @@ export default function Home() {
           </div>
         </footer>
       </div>
+      
+      {/* 設定モーダル */}
+      {showSettings && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">設定</h2>
+              <button onClick={toggleSettings} className="text-gray-500 hover:text-gray-700">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="apiKey" className="block text-sm font-medium text-gray-700 mb-1">
+                  OpenAI API キー
+                </label>
+                <Input
+                  id="apiKey"
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="sk-..."
+                  className="w-full"
+                />
+              </div>
+              
+              <div>
+                <label htmlFor="model" className="block text-sm font-medium text-gray-700 mb-1">
+                  AI モデル
+                </label>
+                <select
+                  id="model"
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-neutral-950"
+                >
+                  {availableModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="pt-2">
+                <Button onClick={handleSaveSettings} className="w-full">
+                  保存
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
