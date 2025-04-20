@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ChatMessage } from "@/components/chat-message";
 import { Send, MessageSquare, Plus, Settings, LogOut } from "lucide-react";
+import { OpenAI } from "openai";
 
 interface Message {
   role: "user" | "assistant";
@@ -28,6 +29,12 @@ const initialChat: Chat = {
     }
   ]
 };
+
+// OpenAIのクライアントインスタンスを作成
+const openai = new OpenAI({
+  apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY || "", // API KEYを環境変数から取得
+  dangerouslyAllowBrowser: true // クライアントサイドで実行するための設定
+});
 
 export default function Home() {
   const [chats, setChats] = useState<Chat[]>([initialChat]);
@@ -53,8 +60,10 @@ export default function Home() {
     
     if (!input.trim()) return;
     
+    const userInput = input.trim();
+    
     // ユーザーメッセージを追加
-    const userMessage: Message = { role: "user", content: input };
+    const userMessage: Message = { role: "user", content: userInput };
     
     setChats(prevChats => 
       prevChats.map(chat => 
@@ -67,28 +76,61 @@ export default function Home() {
     setInput("");
     setIsLoading(true);
     
-    // AIレスポンスをシミュレート
-    setTimeout(() => {
+    try {
+      // OpenAI APIに送信するメッセージ履歴を作成
+      const messages = currentChat.messages.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
+      
+      // ユーザーの新しいメッセージを追加
+      messages.push({ role: 'user', content: userInput });
+      
+      // OpenAI APIを呼び出し
+      const response = await openai.chat.completions.create({
+        model: "gpt-3.5-turbo", // 使用するモデル
+        messages: messages as any,
+        temperature: 0.7,
+      });
+      
+      // AIの応答を取得
       const aiMessage: Message = {
         role: "assistant",
-        content: `あなたのメッセージ「${input}」を受け取りました。実際のAIはここで回答を生成します。`
+        content: response.choices[0]?.message?.content || "すみません、応答を生成できませんでした。"
       };
       
+      // チャット履歴にAIの応答を追加
       setChats(prevChats => 
         prevChats.map(chat => 
           chat.id === currentChatId 
             ? { 
                 ...chat, 
                 // タイトルが初期値の場合、最初のユーザー入力を基にタイトルを更新
-                title: chat.title === "新しいチャット" ? input.slice(0, 20) + (input.length > 20 ? "..." : "") : chat.title,
+                title: chat.title === "新しいチャット" ? userInput.slice(0, 20) + (userInput.length > 20 ? "..." : "") : chat.title,
                 messages: [...chat.messages, aiMessage] 
               }
             : chat
         )
       );
+    } catch (error) {
+      console.error("OpenAI API error:", error);
       
+      // エラーメッセージをアシスタントの応答として追加
+      const errorMessage: Message = {
+        role: "assistant",
+        content: "申し訳ありません。AI応答の生成中にエラーが発生しました。後でもう一度お試しください。"
+      };
+      
+      setChats(prevChats => 
+        prevChats.map(chat => 
+          chat.id === currentChatId 
+            ? { ...chat, messages: [...chat.messages, errorMessage] }
+            : chat
+        )
+      );
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   const createNewChat = () => {
