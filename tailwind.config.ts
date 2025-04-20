@@ -9,6 +9,10 @@ const config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ["var(--font-noto-sans)"],
+        mono: ["var(--font-noto-mono)"],
+      },
       colors: {
         'neutral-50': '#f9fafb',
         'neutral-100': '#f3f4f6',
